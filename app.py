@@ -8,6 +8,8 @@ from fpl_api import (
     calculate_fixture_difficulty
 )
 
+from optimizer import build_best_team
+
 
 # ==================================================
 # PAGE SETUP
@@ -33,61 +35,72 @@ st.write(
 
 try:
 
-    df = pd.read_csv("fpl_player_statistics.csv")
+    df = pd.read_csv(
+        "fpl_player_statistics.csv"
+    )
 
 except Exception as e:
 
-    st.error("Could not load player dataset.")
+    st.error(
+        "Could not load player dataset."
+    )
+
     st.error(str(e))
+
     st.stop()
 
 
-st.success(
-    f"Player dataset loaded — {len(df)} players"
-)
-
-
 # ==================================================
-# LOAD OFFICIAL FPL DATA
+# LOAD FPL API
 # ==================================================
 
 try:
 
     fpl_data = get_fpl_data()
+
     fixtures = get_fixtures()
 
 except Exception as e:
 
-    st.error("Could not connect to the official FPL API.")
+    st.error(
+        "Could not connect to official FPL API."
+    )
+
     st.error(str(e))
+
     st.stop()
 
 
-st.success(
-    "Official FPL data connected successfully!"
+# ==================================================
+# NEXT 5 GAMEWEEKS
+# ==================================================
+
+next_5_gws = get_next_5_gameweeks(
+    fixtures
 )
 
 
-# ==================================================
-# FIND NEXT 5 GAMEWEEKS
-# ==================================================
+st.subheader(
+    "📅 Next 5 Gameweeks"
+)
 
-next_5_gws = get_next_5_gameweeks(fixtures)
-
-
-st.subheader("📅 Next 5 Gameweeks")
 
 if next_5_gws:
 
-    gw_text = " → ".join(
-        [f"GW {gw}" for gw in next_5_gws]
+    st.info(
+        " → ".join(
+            [
+                f"GW {gw}"
+                for gw in next_5_gws
+            ]
+        )
     )
-
-    st.info(gw_text)
 
 else:
 
-    st.warning("No upcoming Gameweeks found.")
+    st.warning(
+        "No upcoming Gameweeks found."
+    )
 
 
 # ==================================================
@@ -101,68 +114,7 @@ teams = {
 
 
 # ==================================================
-# UPCOMING FIXTURES
-# ==================================================
-
-upcoming_fixtures = []
-
-
-for fixture in fixtures:
-
-    if (
-        fixture["event"] in next_5_gws
-        and not fixture["finished"]
-    ):
-
-        home_team = teams.get(
-            fixture["team_h"],
-            "Unknown"
-        )
-
-        away_team = teams.get(
-            fixture["team_a"],
-            "Unknown"
-        )
-
-        upcoming_fixtures.append({
-
-            "Gameweek": fixture["event"],
-
-            "Home": home_team,
-
-            "Away": away_team,
-
-            "Home Difficulty":
-                fixture["team_h_difficulty"],
-
-            "Away Difficulty":
-                fixture["team_a_difficulty"]
-        })
-
-
-fixture_df = pd.DataFrame(
-    upcoming_fixtures
-)
-
-
-st.subheader("🗓️ Upcoming Fixtures")
-
-
-if not fixture_df.empty:
-
-    st.dataframe(
-        fixture_df,
-        use_container_width=True,
-        hide_index=True
-    )
-
-else:
-
-    st.info("No upcoming fixtures found.")
-
-
-# ==================================================
-# CALCULATE 5-GW FIXTURE DIFFICULTY
+# CALCULATE FIXTURE DIFFICULTY
 # ==================================================
 
 fixture_scores = []
@@ -173,7 +125,6 @@ for _, player in df.iterrows():
     club_name = player["club_name"]
 
     team_id = None
-
 
     for team in fpl_data["teams"]:
 
@@ -186,36 +137,47 @@ for _, player in df.iterrows():
 
     if team_id is not None:
 
-        avg_difficulty = calculate_fixture_difficulty(
-            fixtures,
-            team_id,
-            next_5_gws
+        difficulty = (
+            calculate_fixture_difficulty(
+                fixtures,
+                team_id,
+                next_5_gws
+            )
         )
 
     else:
 
-        avg_difficulty = None
+        difficulty = None
 
 
     fixture_scores.append(
-        avg_difficulty
+        difficulty
     )
 
 
-df["5GW Avg Difficulty"] = fixture_scores
+df["5GW Avg Difficulty"] = (
+    fixture_scores
+)
 
 
 # ==================================================
-# CLEAN NUMERIC DATA
+# NUMERIC DATA
 # ==================================================
 
 numeric_columns = [
+
     "form",
+
     "points_per_game",
+
     "total_points",
+
     "expected_goals",
+
     "expected_assists",
+
     "now_cost"
+
 ]
 
 
@@ -230,7 +192,7 @@ for column in numeric_columns:
 
 
 # ==================================================
-# CREATE PERFORMANCE SCORE
+# PERFORMANCE SCORE
 # ==================================================
 
 df["Performance Score"] = (
@@ -245,8 +207,7 @@ df["Performance Score"] = (
 
     (
         df["total_points"].fillna(0)
-        /
-        10
+        / 10
     ) * 0.20
 
     +
@@ -261,18 +222,20 @@ df["Performance Score"] = (
 
 
 # ==================================================
-# CREATE FIXTURE FACTOR
+# FIXTURE FACTOR
 # ==================================================
 
 df["Fixture Factor"] = (
 
-    6 - df["5GW Avg Difficulty"].fillna(3)
+    6
+    -
+    df["5GW Avg Difficulty"].fillna(3)
 
 )
 
 
 # ==================================================
-# CREATE FINAL 5-GW SCORE
+# FINAL 5GW SCORE
 # ==================================================
 
 df["5GW Score"] = (
@@ -287,122 +250,203 @@ df["5GW Score"] = (
 
 
 # ==================================================
-# PLAYER RANKING
+# MAIN OPTIONS
 # ==================================================
 
-st.subheader("🏆 Best Players for the Next 5 GWs")
+st.divider()
+
+st.header(
+    "What do you want to do?"
+)
 
 
-ranking_columns = [
+option = st.radio(
 
-    "player_name",
+    "Choose an option",
 
-    "club_name",
+    [
+        "🏆 Build Full Team",
+        "🔄 Transfer Suggestions"
+    ],
 
-    "position_name",
+    horizontal=True
 
-    "now_cost",
-
-    "form",
-
-    "points_per_game",
-
-    "expected_goals",
-
-    "expected_assists",
-
-    "5GW Avg Difficulty",
-
-    "5GW Score"
-]
+)
 
 
-available_columns = [
+# ==================================================
+# BUILD FULL TEAM
+# ==================================================
 
-    column
+if option == "🏆 Build Full Team":
 
-    for column in ranking_columns
-
-    if column in df.columns
-
-]
-
-
-ranked_players = (
-
-    df[available_columns]
-
-    .sort_values(
-        "5GW Score",
-        ascending=False
+    st.subheader(
+        "🏆 Best £100m Team"
     )
 
-    .head(30)
+    st.write(
+        "The optimizer will select 15 players "
+        "based on their projected 5-GW score."
+    )
 
-)
+
+    if st.button(
+        "🚀 Build My Team",
+        type="primary"
+    ):
+
+        best_team = build_best_team(
+            df,
+            budget=1000
+        )
 
 
-st.dataframe(
-    ranked_players,
-    use_container_width=True,
-    hide_index=True
-)
+        if best_team.empty:
+
+            st.error(
+                "Could not find a valid £100m squad."
+            )
+
+        else:
+
+            # Convert price to millions
+            best_team["Price (£m)"] = (
+                best_team["price"] / 10
+            )
+
+
+            # Total cost
+            total_cost = (
+                best_team["price"].sum()
+                / 10
+            )
+
+
+            st.success(
+                f"Team found! Total cost: "
+                f"£{total_cost:.1f}m"
+            )
+
+
+            # Position order
+            position_order = {
+
+                "Goalkeeper": 1,
+
+                "Defender": 2,
+
+                "Midfielder": 3,
+
+                "Forward": 4
+            }
+
+
+            best_team["position_order"] = (
+                best_team["position_name"]
+                .map(position_order)
+            )
+
+
+            best_team = (
+                best_team
+                .sort_values(
+                    "position_order"
+                )
+            )
+
+
+            display_columns = [
+
+                "player_name",
+
+                "club_name",
+
+                "position_name",
+
+                "Price (£m)",
+
+                "5GW Score",
+
+                "5GW Avg Difficulty"
+
+            ]
+
+
+            st.dataframe(
+
+                best_team[
+                    display_columns
+                ],
+
+                use_container_width=True,
+
+                hide_index=True
+
+            )
+
+
+            # Position summary
+            st.subheader(
+                "📋 Squad Summary"
+            )
+
+
+            position_counts = (
+                best_team[
+                    "position_name"
+                ]
+                .value_counts()
+            )
+
+
+            col1, col2, col3, col4 = (
+                st.columns(4)
+            )
+
+
+            col1.metric(
+                "🧤 GK",
+                position_counts.get(
+                    "Goalkeeper",
+                    0
+                )
+            )
+
+            col2.metric(
+                "🛡️ DEF",
+                position_counts.get(
+                    "Defender",
+                    0
+                )
+            )
+
+            col3.metric(
+                "⚽ MID",
+                position_counts.get(
+                    "Midfielder",
+                    0
+                )
+            )
+
+            col4.metric(
+                "🎯 FWD",
+                position_counts.get(
+                    "Forward",
+                    0
+                )
+            )
 
 
 # ==================================================
-# POSITION FILTER
+# TRANSFER SUGGESTIONS
 # ==================================================
-
-st.subheader("🔎 Filter Players")
-
-selected_position = st.selectbox(
-    "Choose a position",
-    [
-        "All",
-        "Goalkeeper",
-        "Defender",
-        "Midfielder",
-        "Forward"
-    ]
-)
-
-
-if selected_position != "All":
-
-    filtered_players = df[
-        df["position_name"] == selected_position
-    ]
 
 else:
 
-    filtered_players = df
-
-
-filtered_players = (
-
-    filtered_players
-
-    .sort_values(
-        "5GW Score",
-        ascending=False
+    st.subheader(
+        "🔄 Transfer Suggestions"
     )
 
-    .head(30)
-
-)
-
-
-st.dataframe(
-    filtered_players[available_columns],
-    use_container_width=True,
-    hide_index=True
-)
-
-
-# ==================================================
-# SUCCESS
-# ==================================================
-
-st.success(
-    "✅ 5-GW player scores calculated successfully!"
-)
+    st.info(
+        "Transfer mode will be added in the next step."
+    )
