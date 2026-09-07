@@ -35,27 +35,26 @@ try:
 
     df = pd.read_csv("fpl_player_statistics.csv")
 
-    st.success(
-        f"Player dataset loaded successfully — {len(df)} players"
-    )
-
 except Exception as e:
 
-    st.error("Could not load the player dataset.")
+    st.error("Could not load player dataset.")
     st.error(str(e))
     st.stop()
 
 
+st.success(
+    f"Player dataset loaded — {len(df)} players"
+)
+
+
 # ==================================================
-# LOAD OFFICIAL FPL API
+# LOAD OFFICIAL FPL DATA
 # ==================================================
 
 try:
 
     fpl_data = get_fpl_data()
     fixtures = get_fixtures()
-
-    st.success("Official FPL data connected successfully!")
 
 except Exception as e:
 
@@ -64,19 +63,21 @@ except Exception as e:
     st.stop()
 
 
+st.success(
+    "Official FPL data connected successfully!"
+)
+
+
 # ==================================================
 # FIND NEXT 5 GAMEWEEKS
 # ==================================================
 
 next_5_gws = get_next_5_gameweeks(fixtures)
 
-if len(next_5_gws) == 0:
 
-    st.warning("No upcoming Gameweeks found.")
+st.subheader("📅 Next 5 Gameweeks")
 
-else:
-
-    st.subheader("📅 Next 5 Gameweeks")
+if next_5_gws:
 
     gw_text = " → ".join(
         [f"GW {gw}" for gw in next_5_gws]
@@ -84,9 +85,13 @@ else:
 
     st.info(gw_text)
 
+else:
+
+    st.warning("No upcoming Gameweeks found.")
+
 
 # ==================================================
-# CREATE TEAM ID → TEAM NAME
+# TEAM MAPPING
 # ==================================================
 
 teams = {
@@ -100,6 +105,7 @@ teams = {
 # ==================================================
 
 upcoming_fixtures = []
+
 
 for fixture in fixtures:
 
@@ -156,7 +162,7 @@ else:
 
 
 # ==================================================
-# CALCULATE PLAYER FIXTURE DIFFICULTY
+# CALCULATE 5-GW FIXTURE DIFFICULTY
 # ==================================================
 
 fixture_scores = []
@@ -164,14 +170,11 @@ fixture_scores = []
 
 for _, player in df.iterrows():
 
-    # IMPORTANT:
-    # Your CSV uses "club_name"
-
     club_name = player["club_name"]
 
     team_id = None
 
-    # Find the FPL team ID
+
     for team in fpl_data["teams"]:
 
         if team["name"] == club_name:
@@ -181,7 +184,6 @@ for _, player in df.iterrows():
             break
 
 
-    # Calculate average difficulty
     if team_id is not None:
 
         avg_difficulty = calculate_fixture_difficulty(
@@ -200,19 +202,98 @@ for _, player in df.iterrows():
     )
 
 
-# Add difficulty to player data
-
 df["5GW Avg Difficulty"] = fixture_scores
 
 
 # ==================================================
-# PLAYER FIXTURE OUTLOOK
+# CLEAN NUMERIC DATA
 # ==================================================
 
-st.subheader("📊 Player Fixture Outlook")
+numeric_columns = [
+    "form",
+    "points_per_game",
+    "total_points",
+    "expected_goals",
+    "expected_assists",
+    "now_cost"
+]
 
 
-display_columns = [
+for column in numeric_columns:
+
+    if column in df.columns:
+
+        df[column] = pd.to_numeric(
+            df[column],
+            errors="coerce"
+        )
+
+
+# ==================================================
+# CREATE PERFORMANCE SCORE
+# ==================================================
+
+df["Performance Score"] = (
+
+    df["form"].fillna(0) * 0.35
+
+    +
+
+    df["points_per_game"].fillna(0) * 0.30
+
+    +
+
+    (
+        df["total_points"].fillna(0)
+        /
+        10
+    ) * 0.20
+
+    +
+
+    df["expected_goals"].fillna(0) * 0.075
+
+    +
+
+    df["expected_assists"].fillna(0) * 0.075
+
+)
+
+
+# ==================================================
+# CREATE FIXTURE FACTOR
+# ==================================================
+
+df["Fixture Factor"] = (
+
+    6 - df["5GW Avg Difficulty"].fillna(3)
+
+)
+
+
+# ==================================================
+# CREATE FINAL 5-GW SCORE
+# ==================================================
+
+df["5GW Score"] = (
+
+    df["Performance Score"]
+
+    *
+
+    df["Fixture Factor"]
+
+)
+
+
+# ==================================================
+# PLAYER RANKING
+# ==================================================
+
+st.subheader("🏆 Best Players for the Next 5 GWs")
+
+
+ranking_columns = [
 
     "player_name",
 
@@ -222,8 +303,6 @@ display_columns = [
 
     "now_cost",
 
-    "total_points",
-
     "form",
 
     "points_per_game",
@@ -232,39 +311,89 @@ display_columns = [
 
     "expected_assists",
 
-    "5GW Avg Difficulty"
+    "5GW Avg Difficulty",
+
+    "5GW Score"
 ]
 
-
-# Keep only columns that exist
 
 available_columns = [
 
     column
 
-    for column in display_columns
+    for column in ranking_columns
 
     if column in df.columns
+
 ]
 
 
-# Sort by easiest fixtures
-
-fixture_view = (
+ranked_players = (
 
     df[available_columns]
 
     .sort_values(
-        "5GW Avg Difficulty",
-        na_position="last"
+        "5GW Score",
+        ascending=False
     )
 
     .head(30)
+
 )
 
 
 st.dataframe(
-    fixture_view,
+    ranked_players,
+    use_container_width=True,
+    hide_index=True
+)
+
+
+# ==================================================
+# POSITION FILTER
+# ==================================================
+
+st.subheader("🔎 Filter Players")
+
+selected_position = st.selectbox(
+    "Choose a position",
+    [
+        "All",
+        "Goalkeeper",
+        "Defender",
+        "Midfielder",
+        "Forward"
+    ]
+)
+
+
+if selected_position != "All":
+
+    filtered_players = df[
+        df["position_name"] == selected_position
+    ]
+
+else:
+
+    filtered_players = df
+
+
+filtered_players = (
+
+    filtered_players
+
+    .sort_values(
+        "5GW Score",
+        ascending=False
+    )
+
+    .head(30)
+
+)
+
+
+st.dataframe(
+    filtered_players[available_columns],
     use_container_width=True,
     hide_index=True
 )
@@ -275,5 +404,5 @@ st.dataframe(
 # ==================================================
 
 st.success(
-    "✅ Next 5 Gameweeks and player fixture difficulty calculated!"
+    "✅ 5-GW player scores calculated successfully!"
 )
