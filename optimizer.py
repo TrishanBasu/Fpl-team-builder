@@ -3,10 +3,15 @@ from scipy.optimize import milp, LinearConstraint, Bounds
 import numpy as np
 
 
-def build_best_team(df, budget=1000):
+# ============================================================
+# BUILD BEST £100m TEAM
+# ============================================================
+
+def build_best_team(df, budget=100):
 
     players = df.copy()
 
+    # Your CSV stores prices directly in £m
     players["price"] = pd.to_numeric(
         players["now_cost"],
         errors="coerce"
@@ -17,7 +22,7 @@ def build_best_team(df, budget=1000):
         errors="coerce"
     ).fillna(0)
 
-    # Actual position codes in the dataset
+    # Actual position codes in your CSV
     position_requirements = {
         "GKP": 2,
         "DEF": 5,
@@ -36,13 +41,17 @@ def build_best_team(df, budget=1000):
     if n == 0:
         return pd.DataFrame()
 
+    # Maximize 5GW Score
     objective = -players["5GW Score"].values
 
     constraints = []
     lower_bounds = []
     upper_bounds = []
 
-    # Position requirements
+    # --------------------------------------------------------
+    # POSITION REQUIREMENTS
+    # --------------------------------------------------------
+
     for position, required in position_requirements.items():
 
         row = (
@@ -53,7 +62,10 @@ def build_best_team(df, budget=1000):
         lower_bounds.append(required)
         upper_bounds.append(required)
 
-    # £100m budget
+    # --------------------------------------------------------
+    # £100m BUDGET
+    # --------------------------------------------------------
+
     constraints.append(
         players["price"].values
     )
@@ -61,7 +73,10 @@ def build_best_team(df, budget=1000):
     lower_bounds.append(0)
     upper_bounds.append(budget)
 
-    # Maximum 3 players from one club
+    # --------------------------------------------------------
+    # MAX 3 PLAYERS FROM ONE CLUB
+    # --------------------------------------------------------
+
     for club in players["club_name"].dropna().unique():
 
         row = (
@@ -72,7 +87,13 @@ def build_best_team(df, budget=1000):
         lower_bounds.append(0)
         upper_bounds.append(3)
 
-    constraint_matrix = np.array(constraints)
+    # --------------------------------------------------------
+    # SOLVER
+    # --------------------------------------------------------
+
+    constraint_matrix = np.array(
+        constraints
+    )
 
     linear_constraint = LinearConstraint(
         constraint_matrix,
@@ -100,7 +121,14 @@ def build_best_team(df, budget=1000):
     return selected
 
 
-def is_valid_squad(squad, budget=1000):
+# ============================================================
+# CHECK VALID SQUAD
+# ============================================================
+
+def is_valid_squad(
+    squad,
+    budget=100
+):
 
     if len(squad) != 15:
         return False
@@ -112,7 +140,10 @@ def is_valid_squad(squad, budget=1000):
         "FWD": 3
     }
 
-    for position, required in required_positions.items():
+    # Position validation
+    for position, required in (
+        required_positions.items()
+    ):
 
         count = (
             squad["position_name"] == position
@@ -121,23 +152,37 @@ def is_valid_squad(squad, budget=1000):
         if count != required:
             return False
 
-    total_cost = squad["now_cost"].sum()
+    # Budget validation
+    total_cost = pd.to_numeric(
+        squad["now_cost"],
+        errors="coerce"
+    ).sum()
 
     if total_cost > budget:
         return False
 
-    club_counts = squad["club_name"].value_counts()
+    # Club limit
+    club_counts = (
+        squad["club_name"]
+        .value_counts()
+    )
 
-    if not club_counts.empty and club_counts.max() > 3:
-        return False
+    if not club_counts.empty:
+
+        if club_counts.max() > 3:
+            return False
 
     return True
 
 
+# ============================================================
+# FIND LEGAL SINGLE TRANSFERS
+# ============================================================
+
 def find_transfer_suggestions(
     df,
     current_squad,
-    budget=1000
+    budget=100
 ):
 
     suggestions = []
@@ -150,17 +195,28 @@ def find_transfer_suggestions(
         current_squad["5GW Score"].sum()
     )
 
+    # Players outside current squad
     available_players = df[
-        ~df["player_name"].isin(current_names)
+        ~df["player_name"].isin(
+            current_names
+        )
     ].copy()
+
+    # --------------------------------------------------------
+    # TRY EVERY POSSIBLE PLAYER SWAP
+    # --------------------------------------------------------
 
     for current_index, current_player in (
         current_squad.iterrows()
     ):
 
-        position = current_player["position_name"]
+        position = (
+            current_player["position_name"]
+        )
 
-        current_name = current_player["player_name"]
+        current_name = (
+            current_player["player_name"]
+        )
 
         current_price = float(
             current_player["now_cost"]
@@ -170,21 +226,27 @@ def find_transfer_suggestions(
             current_player["5GW Score"]
         )
 
+        # Same-position replacements only
         alternatives = available_players[
-            available_players["position_name"] == position
+            available_players["position_name"]
+            == position
         ].copy()
 
-        for _, new_player in alternatives.iterrows():
+        for _, new_player in (
+            alternatives.iterrows()
+        ):
 
+            # Create hypothetical squad
             new_squad = current_squad.copy()
 
             new_squad.loc[
                 current_index
             ] = new_player
 
+            # Make sure new squad is legal
             if not is_valid_squad(
                 new_squad,
-                budget
+                budget=budget
             ):
                 continue
 
@@ -198,20 +260,28 @@ def find_transfer_suggestions(
                 current_total_score
             )
 
+            # Only show improvements
             if gain <= 0:
                 continue
 
+            new_price = float(
+                new_player["now_cost"]
+            )
+
+            # Direct £m difference
             price_change = (
-                float(new_player["now_cost"])
+                new_price
                 -
                 current_price
-            ) / 10
+            )
 
             suggestions.append({
 
                 "Sell": current_name,
 
-                "Buy": new_player["player_name"],
+                "Buy": new_player[
+                    "player_name"
+                ],
 
                 "Position": position,
 
@@ -221,7 +291,11 @@ def find_transfer_suggestions(
                 ),
 
                 "New Score": round(
-                    float(new_player["5GW Score"]),
+                    float(
+                        new_player[
+                            "5GW Score"
+                        ]
+                    ),
                     2
                 ),
 
@@ -235,22 +309,33 @@ def find_transfer_suggestions(
                     1
                 ),
 
-                "New Club": new_player["club_name"]
+                "New Club": new_player[
+                    "club_name"
+                ]
 
             })
 
     if not suggestions:
         return pd.DataFrame()
 
-    results = pd.DataFrame(suggestions)
+    results = pd.DataFrame(
+        suggestions
+    )
 
+    # Best projected improvement first
     results = results.sort_values(
         "Gain",
         ascending=False
     )
 
+    # Remove duplicate transfers
     results = results.drop_duplicates(
-        subset=["Sell", "Buy"]
+        subset=[
+            "Sell",
+            "Buy"
+        ]
     )
 
-    return results.reset_index(drop=True)
+    return results.reset_index(
+        drop=True
+    )
