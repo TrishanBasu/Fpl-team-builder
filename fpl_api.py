@@ -1,14 +1,12 @@
 import requests
+import pandas as pd
 
 
 BASE_URL = "https://fantasy.premierleague.com/api"
 
 
 def get_fpl_data():
-    """
-    Get current player, team and gameweek data
-    from the official FPL API.
-    """
+    """Get current player, team and gameweek data."""
 
     url = f"{BASE_URL}/bootstrap-static/"
 
@@ -23,9 +21,7 @@ def get_fpl_data():
 
 
 def get_fixtures():
-    """
-    Get all current FPL fixtures.
-    """
+    """Get all current FPL fixtures."""
 
     url = f"{BASE_URL}/fixtures/"
 
@@ -40,10 +36,7 @@ def get_fixtures():
 
 
 def get_next_5_gameweeks(fixtures):
-    """
-    Find the next 5 Gameweeks that still contain
-    unfinished fixtures.
-    """
+    """Find the next 5 Gameweeks with unfinished fixtures."""
 
     upcoming = set()
 
@@ -67,13 +60,7 @@ def calculate_fixture_difficulty(
     team_id,
     next_5_gws
 ):
-    """
-    Calculate average FPL fixture difficulty
-    for a team over the next 5 Gameweeks.
-
-    If a team has multiple fixtures in a GW,
-    every fixture is included.
-    """
+    """Calculate average fixture difficulty for the next 5 GWs."""
 
     difficulties = []
 
@@ -92,9 +79,7 @@ def calculate_fixture_difficulty(
             )
 
             if difficulty is not None:
-                difficulties.append(
-                    difficulty
-                )
+                difficulties.append(difficulty)
 
         elif fixture.get("team_a") == team_id:
 
@@ -103,9 +88,7 @@ def calculate_fixture_difficulty(
             )
 
             if difficulty is not None:
-                difficulties.append(
-                    difficulty
-                )
+                difficulties.append(difficulty)
 
     if not difficulties:
         return None
@@ -116,16 +99,11 @@ def calculate_fixture_difficulty(
     )
 
 
-def prepare_player_dataframe(
-    fpl_data
-):
+def prepare_player_dataframe(fpl_data):
     """
-    Convert official FPL API player data into
-    a clean pandas DataFrame suitable for the
-    optimizer.
+    Convert official FPL API player data
+    into a pandas DataFrame.
     """
-
-    import pandas as pd
 
     players = pd.DataFrame(
         fpl_data["elements"]
@@ -135,7 +113,7 @@ def prepare_player_dataframe(
         fpl_data["teams"]
     )
 
-    # Map FPL position IDs to readable codes
+    # FPL position IDs
     position_map = {
         1: "GKP",
         2: "DEF",
@@ -148,7 +126,7 @@ def prepare_player_dataframe(
         .map(position_map)
     )
 
-    # Map team IDs to team names
+    # Team ID → Team Name
     team_map = dict(
         zip(
             teams["id"],
@@ -161,7 +139,7 @@ def prepare_player_dataframe(
         .map(team_map)
     )
 
-    # Use web_name when available
+    # Player name
     players["player_name"] = (
         players["web_name"]
         .fillna(
@@ -171,8 +149,8 @@ def prepare_player_dataframe(
         )
     )
 
-    # Official FPL API stores price in tenths
-    # e.g. 150 = £15.0m
+    # Official FPL API price:
+    # 150 = £15.0m
     players["now_cost"] = (
         pd.to_numeric(
             players["now_cost"],
@@ -181,6 +159,7 @@ def prepare_player_dataframe(
         / 10
     )
 
+    # Make sure numerical columns are numeric
     numeric_columns = [
         "form",
         "points_per_game",
