@@ -16,14 +16,7 @@ POSITION_REQUIREMENTS = {
 }
 
 
-def build_best_team(
-    df,
-    budget=100
-):
-    """
-    Build the highest-scoring legal 15-player
-    FPL squad within the £100m budget.
-    """
+def build_best_team(df, budget=100):
 
     players = df.copy()
 
@@ -48,30 +41,24 @@ def build_best_team(
 
     n = len(players)
 
-    objective = -players[
-        "5GW Score"
-    ].values
+    objective = -players["5GW Score"].values
 
     constraints = []
     lower_bounds = []
     upper_bounds = []
 
     # Position requirements
-    for position, required in (
-        POSITION_REQUIREMENTS.items()
-    ):
+    for position, required in POSITION_REQUIREMENTS.items():
 
         row = (
-            players["position_name"]
-            == position
+            players["position_name"] == position
         ).astype(int).values
 
         constraints.append(row)
-
         lower_bounds.append(required)
         upper_bounds.append(required)
 
-    # £100m budget
+    # Budget
     constraints.append(
         players["price"].values
     )
@@ -80,15 +67,10 @@ def build_best_team(
     upper_bounds.append(budget)
 
     # Maximum 3 players from one club
-    for club in (
-        players["club_name"]
-        .dropna()
-        .unique()
-    ):
+    for club in players["club_name"].dropna().unique():
 
         row = (
-            players["club_name"]
-            == club
+            players["club_name"] == club
         ).astype(int).values
 
         constraints.append(row)
@@ -96,9 +78,7 @@ def build_best_team(
         lower_bounds.append(0)
         upper_bounds.append(3)
 
-    constraint_matrix = np.array(
-        constraints
-    )
+    constraint_matrix = np.array(constraints)
 
     linear_constraint = LinearConstraint(
         constraint_matrix,
@@ -108,51 +88,29 @@ def build_best_team(
 
     result = milp(
         c=objective,
-
         integrality=np.ones(n),
-
         bounds=Bounds(
             np.zeros(n),
             np.ones(n)
         ),
-
         constraints=linear_constraint
     )
 
     if not result.success:
         return pd.DataFrame()
 
-    selected = players[
-        result.x > 0.5
-    ].copy()
-
-    return selected
+    return players[result.x > 0.5].copy()
 
 
-def is_valid_squad_structure(
-    squad
-):
-    """
-    Validate the actual FPL squad structure.
-
-    IMPORTANT:
-    This does NOT check the £100m current value.
-
-    Player prices can rise after a user bought them,
-    so current market value is not the same as the
-    original squad budget.
-    """
+def is_valid_squad_structure(squad):
 
     if len(squad) != 15:
         return False
 
-    for position, required in (
-        POSITION_REQUIREMENTS.items()
-    ):
+    for position, required in POSITION_REQUIREMENTS.items():
 
         count = (
-            squad["position_name"]
-            == position
+            squad["position_name"] == position
         ).sum()
 
         if count != required:
@@ -163,11 +121,10 @@ def is_valid_squad_structure(
         .value_counts()
     )
 
-    if (
-        not club_counts.empty
-        and club_counts.max() > 3
-    ):
-        return False
+    if not club_counts.empty:
+
+        if club_counts.max() > 3:
+            return False
 
     return True
 
@@ -175,19 +132,9 @@ def is_valid_squad_structure(
 def find_transfer_suggestions(
     df,
     current_squad,
+    bank,
     budget=100
 ):
-    """
-    Find legal single-player transfer suggestions.
-
-    The current squad's present market value is NOT
-    used to reject the squad.
-
-    Transfers are compared using current player prices.
-    Exact FPL affordability can depend on the user's
-    individual selling prices and bank balance, which
-    are not available from the public player API.
-    """
 
     current_squad = current_squad.copy()
 
@@ -201,10 +148,10 @@ def find_transfer_suggestions(
             )
         )
 
-    # A valid FPL squad must contain exactly 15 players
     if len(current_squad) != 15:
         return pd.DataFrame()
 
+    # Convert prices
     current_squad["now_cost"] = pd.to_numeric(
         current_squad["now_cost"],
         errors="coerce"
@@ -216,12 +163,10 @@ def find_transfer_suggestions(
     ).fillna(0)
 
     current_total_score = (
-        current_squad[
-            "5GW Score"
-        ].sum()
+        current_squad["5GW Score"].sum()
     )
 
-    # Use unique FPL player IDs
+    # Current player IDs
     if "id" in current_squad.columns:
 
         current_ids = set(
@@ -234,33 +179,27 @@ def find_transfer_suggestions(
 
     else:
 
-        # Fallback
         current_names = set(
-            current_squad[
-                "player_name"
-            ]
+            current_squad["player_name"]
         )
 
         available_players = df[
-            ~df[
-                "player_name"
-            ].isin(current_names)
+            ~df["player_name"].isin(
+                current_names
+            )
         ].copy()
 
-    available_players[
-        "now_cost"
-    ] = pd.to_numeric(
+    available_players["now_cost"] = pd.to_numeric(
         available_players["now_cost"],
         errors="coerce"
     ).fillna(0)
 
-    available_players[
-        "5GW Score"
-    ] = pd.to_numeric(
+    available_players["5GW Score"] = pd.to_numeric(
         available_players["5GW Score"],
         errors="coerce"
     ).fillna(0)
 
+    # Highest scoring candidates first
     available_players = (
         available_players
         .sort_values(
@@ -273,70 +212,89 @@ def find_transfer_suggestions(
 
     candidates_per_position = 30
 
+    # ------------------------------------------------
+    # Test every player currently owned
+    # ------------------------------------------------
+
     for current_index, current_player in (
         current_squad.iterrows()
     ):
 
-        position = (
-            current_player[
-                "position_name"
-            ]
-        )
+        position = current_player[
+            "position_name"
+        ]
 
-        current_name = (
-            current_player[
-                "player_name"
-            ]
-        )
+        current_name = current_player[
+            "player_name"
+        ]
 
         current_price = float(
-            current_player[
-                "now_cost"
-            ]
+            current_player["now_cost"]
         )
 
         current_score = float(
-            current_player[
-                "5GW Score"
-            ]
+            current_player["5GW Score"]
         )
 
+        # Candidates with same position
         alternatives = (
             available_players[
                 available_players[
                     "position_name"
                 ] == position
             ]
-            .head(
-                candidates_per_position
-            )
+            .head(candidates_per_position)
         )
 
-        # Only consider players with a better
-        # projected 5GW score
+        # Only players who improve the score
         alternatives = alternatives[
-            alternatives[
-                "5GW Score"
-            ] > current_score
+            alternatives["5GW Score"]
+            > current_score
         ]
 
         for _, new_player in (
             alternatives.iterrows()
         ):
 
-            new_club = (
-                new_player[
-                    "club_name"
-                ]
+            new_price = float(
+                new_player["now_cost"]
             )
 
-            old_club = (
-                current_player[
-                    "club_name"
-                ]
+            # ----------------------------------------
+            # COST OF TRANSFER
+            # ----------------------------------------
+
+            price_change = (
+                new_price
+                - current_price
             )
 
-            # Maximum 3 players from one club
+            # If player is cheaper,
+            # you receive money back.
+            required_extra_money = max(
+                0,
+                price_change
+            )
+
+            # ----------------------------------------
+            # BANK BALANCE CHECK
+            # ----------------------------------------
+
+            if required_extra_money > bank:
+                continue
+
+            # ----------------------------------------
+            # CLUB LIMIT
+            # ----------------------------------------
+
+            new_club = new_player[
+                "club_name"
+            ]
+
+            old_club = current_player[
+                "club_name"
+            ]
+
             if new_club != old_club:
 
                 new_club_count = (
@@ -350,25 +308,28 @@ def find_transfer_suggestions(
                 if new_club_count >= 3:
                     continue
 
-            # Create the new squad
-            new_squad = (
-                current_squad.copy()
-            )
+            # ----------------------------------------
+            # CREATE NEW SQUAD
+            # ----------------------------------------
+
+            new_squad = current_squad.copy()
 
             new_squad.loc[
                 current_index
             ] = new_player
 
-            # Check squad structure only
+            # Structure validation
             if not is_valid_squad_structure(
                 new_squad
             ):
                 continue
 
+            # ----------------------------------------
+            # SCORE
+            # ----------------------------------------
+
             new_total_score = (
-                new_squad[
-                    "5GW Score"
-                ].sum()
+                new_squad["5GW Score"].sum()
             )
 
             gain = (
@@ -378,17 +339,6 @@ def find_transfer_suggestions(
 
             if gain <= 0:
                 continue
-
-            new_price = float(
-                new_player[
-                    "now_cost"
-                ]
-            )
-
-            price_change = (
-                new_price
-                - current_price
-            )
 
             suggestions.append({
 
@@ -424,6 +374,16 @@ def find_transfer_suggestions(
                     1
                 ),
 
+                "Required From Bank (£m)": round(
+                    required_extra_money,
+                    1
+                ),
+
+                "Bank After Transfer (£m)": round(
+                    bank - required_extra_money,
+                    1
+                ),
+
                 "New Club": new_club
             })
 
@@ -446,9 +406,7 @@ def find_transfer_suggestions(
                 "Buy"
             ]
         )
-        .reset_index(
-            drop=True
-        )
+        .reset_index(drop=True)
     )
 
     return results
