@@ -1,41 +1,65 @@
 import requests
 
 
-def get_fpl_data():
-    url = "https://fantasy.premierleague.com/api/bootstrap-static/"
+BASE_URL = "https://fantasy.premierleague.com/api"
 
-    response = requests.get(url)
+
+def get_fpl_data():
+    """
+    Get current player, team and gameweek data
+    from the official FPL API.
+    """
+
+    url = f"{BASE_URL}/bootstrap-static/"
+
+    response = requests.get(
+        url,
+        timeout=20
+    )
+
     response.raise_for_status()
 
     return response.json()
 
 
 def get_fixtures():
-    url = "https://fantasy.premierleague.com/api/fixtures/"
+    """
+    Get all current FPL fixtures.
+    """
 
-    response = requests.get(url)
+    url = f"{BASE_URL}/fixtures/"
+
+    response = requests.get(
+        url,
+        timeout=20
+    )
+
     response.raise_for_status()
 
     return response.json()
 
 
 def get_next_5_gameweeks(fixtures):
+    """
+    Find the next 5 Gameweeks that still contain
+    unfinished fixtures.
+    """
 
-    gameweeks = []
+    upcoming = set()
 
     for fixture in fixtures:
 
-        if (
-            not fixture["finished"]
-            and fixture["event"] is not None
-        ):
+        event = fixture.get("event")
 
-            if fixture["event"] not in gameweeks:
-                gameweeks.append(fixture["event"])
+        if event is None:
+            continue
 
-    gameweeks.sort()
+        if fixture.get("finished"):
+            continue
 
-    return gameweeks[:5]
+        upcoming.add(event)
+
+    return sorted(upcoming)[:5]
 
 
 def calculate_fixture_difficulty(
@@ -43,26 +67,44 @@ def calculate_fixture_difficulty(
     team_id,
     next_5_gws
 ):
+    """
+    Calculate average FPL fixture difficulty
+    for a team over the next 5 Gameweeks.
+
+    If a team has multiple fixtures in a GW,
+    every fixture is included.
+    """
 
     difficulties = []
 
     for fixture in fixtures:
 
-        if (
-            fixture["event"] in next_5_gws
-            and not fixture["finished"]
-        ):
+        if fixture.get("event") not in next_5_gws:
+            continue
 
-            if fixture["team_h"] == team_id:
+        if fixture.get("finished"):
+            continue
 
+        if fixture.get("team_h") == team_id:
+
+            difficulty = fixture.get(
+                "team_h_difficulty"
+            )
+
+            if difficulty is not None:
                 difficulties.append(
-                    fixture["team_h_difficulty"]
+                    difficulty
                 )
 
-            elif fixture["team_a"] == team_id:
+        elif fixture.get("team_a") == team_id:
 
+            difficulty = fixture.get(
+                "team_a_difficulty"
+            )
+
+            if difficulty is not None:
                 difficulties.append(
-                    fixture["team_a_difficulty"]
+                    difficulty
                 )
 
     if not difficulties:
@@ -72,3 +114,90 @@ def calculate_fixture_difficulty(
         sum(difficulties) / len(difficulties),
         2
     )
+
+
+def prepare_player_dataframe(
+    fpl_data
+):
+    """
+    Convert official FPL API player data into
+    a clean pandas DataFrame suitable for the
+    optimizer.
+    """
+
+    import pandas as pd
+
+    players = pd.DataFrame(
+        fpl_data["elements"]
+    )
+
+    teams = pd.DataFrame(
+        fpl_data["teams"]
+    )
+
+    # Map FPL position IDs to readable codes
+    position_map = {
+        1: "GKP",
+        2: "DEF",
+        3: "MID",
+        4: "FWD"
+    }
+
+    players["position_name"] = (
+        players["element_type"]
+        .map(position_map)
+    )
+
+    # Map team IDs to team names
+    team_map = dict(
+        zip(
+            teams["id"],
+            teams["name"]
+        )
+    )
+
+    players["club_name"] = (
+        players["team"]
+        .map(team_map)
+    )
+
+    # Use web_name when available
+    players["player_name"] = (
+        players["web_name"]
+        .fillna(
+            players["first_name"]
+            + " "
+            + players["second_name"]
+        )
+    )
+
+    # Official FPL API stores price in tenths
+    # e.g. 150 = £15.0m
+    players["now_cost"] = (
+        pd.to_numeric(
+            players["now_cost"],
+            errors="coerce"
+        )
+        / 10
+    )
+
+    numeric_columns = [
+        "form",
+        "points_per_game",
+        "total_points",
+        "expected_goals",
+        "expected_assists",
+        "minutes",
+        "selected_by_percent"
+    ]
+
+    for column in numeric_columns:
+
+        if column in players.columns:
+
+            players[column] = pd.to_numeric(
+                players[column],
+                errors="coerce"
+            )
+
+    return players
