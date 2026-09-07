@@ -11,13 +11,10 @@ from fpl_api import (
 
 from optimizer import (
     build_best_team,
-    find_transfer_suggestions
+    find_transfer_suggestions,
+    is_valid_squad_structure
 )
 
-
-# ==================================================
-# PAGE CONFIG
-# ==================================================
 
 st.set_page_config(
     page_title="FPL 5-Gameweek Optimizer",
@@ -25,10 +22,6 @@ st.set_page_config(
     layout="wide"
 )
 
-
-# ==================================================
-# TITLE
-# ==================================================
 
 st.title(
     "⚽ FPL 5-Gameweek Optimizer"
@@ -46,9 +39,9 @@ st.caption(
 )
 
 
-# ==================================================
+# --------------------------------------------------
 # LOAD LIVE FPL DATA
-# ==================================================
+# --------------------------------------------------
 
 try:
 
@@ -73,9 +66,9 @@ except Exception as e:
     st.stop()
 
 
-# ==================================================
+# --------------------------------------------------
 # PREPARE PLAYER DATA
-# ==================================================
+# --------------------------------------------------
 
 try:
 
@@ -96,9 +89,9 @@ except Exception as e:
     st.stop()
 
 
-# ==================================================
+# --------------------------------------------------
 # NEXT 5 GAMEWEEKS
-# ==================================================
+# --------------------------------------------------
 
 next_5_gws = (
     get_next_5_gameweeks(
@@ -129,9 +122,9 @@ else:
     )
 
 
-# ==================================================
-# CALCULATE FIXTURE DIFFICULTY
-# ==================================================
+# --------------------------------------------------
+# FIXTURE DIFFICULTY
+# --------------------------------------------------
 
 fixture_scores = []
 
@@ -158,9 +151,9 @@ df[
 ] = fixture_scores
 
 
-# ==================================================
-# PERFORMANCE SCORE
-# ==================================================
+# --------------------------------------------------
+# NUMERIC DATA
+# --------------------------------------------------
 
 numeric_columns = [
     "form",
@@ -174,16 +167,18 @@ numeric_columns = [
 
 for column in numeric_columns:
 
-    if column in df.columns:
+    if column not in df.columns:
 
-        df[column] = pd.to_numeric(
-            df[column],
-            errors="coerce"
-        )
+        df[column] = 0
+
+    df[column] = pd.to_numeric(
+        df[column],
+        errors="coerce"
+    )
 
 
 # --------------------------------------------------
-# Transparent scoring model
+# PERFORMANCE SCORE
 # --------------------------------------------------
 
 df[
@@ -228,9 +223,9 @@ df[
 )
 
 
-# ==================================================
+# --------------------------------------------------
 # FIXTURE FACTOR
-# ==================================================
+# --------------------------------------------------
 
 df[
     "Fixture Factor"
@@ -244,9 +239,9 @@ df[
 )
 
 
-# ==================================================
+# --------------------------------------------------
 # FINAL 5GW SCORE
-# ==================================================
+# --------------------------------------------------
 
 df[
     "5GW Score"
@@ -264,10 +259,6 @@ df[
 )
 
 
-# ==================================================
-# SHOW DATA STATUS
-# ==================================================
-
 st.success(
     "🟢 Live FPL data loaded successfully"
 )
@@ -280,9 +271,9 @@ st.caption(
 st.divider()
 
 
-# ==================================================
+# --------------------------------------------------
 # MAIN OPTIONS
-# ==================================================
+# --------------------------------------------------
 
 st.header(
     "What do you want to do?"
@@ -338,10 +329,6 @@ if option == "🏆 Build Full Team":
 
         else:
 
-            # ------------------------------------------
-            # PRICE
-            # ------------------------------------------
-
             best_team[
                 "Price (£m)"
             ] = best_team[
@@ -354,20 +341,10 @@ if option == "🏆 Build Full Team":
                 ].sum()
             )
 
-
-            # ------------------------------------------
-            # SUCCESS
-            # ------------------------------------------
-
             st.success(
                 f"✅ Team found! "
                 f"Total cost: £{total_cost:.1f}m"
             )
-
-
-            # ------------------------------------------
-            # POSITION ORDER
-            # ------------------------------------------
 
             position_order = {
                 "GKP": 1,
@@ -387,18 +364,12 @@ if option == "🏆 Build Full Team":
                 )
             )
 
-
             best_team = (
                 best_team
                 .sort_values(
                     "position_order"
                 )
             )
-
-
-            # ------------------------------------------
-            # POSITION NAMES
-            # ------------------------------------------
 
             position_names = {
                 "GKP": "Goalkeeper",
@@ -418,11 +389,6 @@ if option == "🏆 Build Full Team":
                 )
             )
 
-
-            # ------------------------------------------
-            # DISPLAY
-            # ------------------------------------------
-
             display_columns = [
                 "player_name",
                 "club_name",
@@ -431,7 +397,6 @@ if option == "🏆 Build Full Team":
                 "5GW Score",
                 "5GW Avg Difficulty"
             ]
-
 
             st.dataframe(
                 best_team[
@@ -443,11 +408,6 @@ if option == "🏆 Build Full Team":
                 hide_index=True
             )
 
-
-            # ------------------------------------------
-            # SUMMARY
-            # ------------------------------------------
-
             st.subheader(
                 "📊 Squad Summary"
             )
@@ -456,7 +416,6 @@ if option == "🏆 Build Full Team":
                 st.columns(3)
             )
 
-
             with col1:
 
                 st.metric(
@@ -464,14 +423,12 @@ if option == "🏆 Build Full Team":
                     f"£{total_cost:.1f}m"
                 )
 
-
             with col2:
 
                 st.metric(
                     "Money Remaining",
                     f"£{100 - total_cost:.1f}m"
                 )
-
 
             with col3:
 
@@ -493,42 +450,79 @@ else:
 
     st.write(
         "Select your current 15-man squad. "
-        "The optimizer will test legal single transfers."
+        "The optimizer will find the best "
+        "single-player improvements."
+    )
+
+    # ----------------------------------------------
+    # CREATE UNIQUE PLAYER OPTIONS
+    # ----------------------------------------------
+
+    df = df.copy()
+
+    df["player_option"] = (
+        df["player_name"].astype(str)
+        + " — "
+        + df["club_name"].astype(str)
+        + " — "
+        + df["position_name"].astype(str)
+        + " — ID "
+        + df["id"].astype(str)
     )
 
 
-    # ----------------------------------------------
-    # PLAYER LIST
-    # ----------------------------------------------
-
-    player_names = sorted(
+    player_options = (
         df[
-            "player_name"
+            [
+                "id",
+                "player_option"
+            ]
         ]
-        .dropna()
-        .unique()
-        .tolist()
+        .drop_duplicates(
+            subset=["id"]
+        )
+        .sort_values(
+            "player_option"
+        )
     )
 
 
-    selected_players = st.multiselect(
+    # ----------------------------------------------
+    # PLAYER SELECTOR
+    # ----------------------------------------------
+
+    selected_options = st.multiselect(
+
         "Select your current squad (15 players)",
 
-        player_names,
+        player_options[
+            "player_option"
+        ].tolist(),
 
         max_selections=15
     )
 
 
-    # ----------------------------------------------
-    # NOT ENOUGH PLAYERS
-    # ----------------------------------------------
+    # Convert selected unique options
+    # back to FPL player IDs
 
-    if len(selected_players) < 15:
+    selected_ids = (
+        player_options[
+            player_options[
+                "player_option"
+            ].isin(
+                selected_options
+            )
+        ]["id"]
+        .tolist()
+    )
+
+
+    if len(selected_ids) < 15:
 
         st.info(
             f"Select "
-            f"{15 - len(selected_players)} "
+            f"{15 - len(selected_ids)} "
             f"more player(s)."
         )
 
@@ -541,17 +535,28 @@ else:
 
 
         # ------------------------------------------
-        # CURRENT SQUAD
+        # BUILD CURRENT SQUAD USING UNIQUE ID
         # ------------------------------------------
 
         current_squad = df[
-            df[
-                "player_name"
-            ].isin(
-                selected_players
+            df["id"].isin(
+                selected_ids
             )
         ].copy()
 
+
+        # Extra safety
+        current_squad = (
+            current_squad
+            .drop_duplicates(
+                subset=["id"]
+            )
+        )
+
+
+        # ------------------------------------------
+        # CURRENT SQUAD DISPLAY
+        # ------------------------------------------
 
         st.subheader(
             "👥 Your Current Squad"
@@ -607,7 +612,7 @@ else:
 
 
         # ------------------------------------------
-        # VALIDATE SQUAD
+        # SQUAD STRUCTURE
         # ------------------------------------------
 
         position_counts = (
@@ -618,7 +623,7 @@ else:
         )
 
 
-        total_cost = (
+        total_current_value = (
             current_squad[
                 "now_cost"
             ].sum()
@@ -652,7 +657,10 @@ else:
         }
 
 
-        # Position validation
+        # ------------------------------------------
+        # POSITION CHECK
+        # ------------------------------------------
+
         for position, required in (
             required_positions.items()
         ):
@@ -670,17 +678,10 @@ else:
                 )
 
 
-        # Budget validation
-        if total_cost > 100:
+        # ------------------------------------------
+        # CLUB CHECK
+        # ------------------------------------------
 
-            invalid_reasons.append(
-                f"Squad costs "
-                f"£{total_cost:.1f}m "
-                f"(over the £100m limit)."
-            )
-
-
-        # Club validation
         if not club_counts.empty:
 
             if club_counts.max() > 3:
@@ -702,14 +703,14 @@ else:
 
 
         # ------------------------------------------
-        # INVALID SQUAD
+        # VALIDATION RESULT
         # ------------------------------------------
 
         if invalid_reasons:
 
             st.warning(
-                "⚠️ Your selected squad is "
-                "not a valid FPL squad:"
+                "⚠️ Your selected squad does not "
+                "match the standard FPL squad structure:"
             )
 
             for reason in invalid_reasons:
@@ -718,31 +719,37 @@ else:
                     f"• {reason}"
                 )
 
-
             st.info(
-                "Please select a valid "
-                "15-player FPL squad before "
-                "searching for transfers."
+                "Check that you selected exactly "
+                "2 GKP, 5 DEF, 5 MID and 3 FWD, "
+                "with no more than 3 players from "
+                "one club."
             )
 
-
-        # ------------------------------------------
-        # VALID SQUAD
-        # ------------------------------------------
 
         else:
 
-            money_remaining = (
-                100 - total_cost
-            )
-
+            # IMPORTANT:
+            # We display current value but DO NOT
+            # reject the squad because of it.
 
             st.success(
-                f"✅ Valid squad — "
-                f"£{total_cost:.1f}m used — "
-                f"£{money_remaining:.1f}m remaining"
+                f"✅ Valid FPL squad structure — "
+                f"current player value: "
+                f"£{total_current_value:.1f}m"
             )
 
+
+            st.caption(
+                "ℹ️ Current player value can be above "
+                "£100m because player prices may have "
+                "risen since you bought them."
+            )
+
+
+            # --------------------------------------
+            # TRANSFER BUTTON
+            # --------------------------------------
 
             if st.button(
                 "🔍 Find Best Transfers",
@@ -762,22 +769,13 @@ else:
                     )
 
 
-                # ----------------------------------
-                # NO TRANSFERS
-                # ----------------------------------
-
                 if transfer_df.empty:
 
                     st.info(
-                        "No legal transfers found "
-                        "that improve your projected "
-                        "5-GW score."
+                        "No improving transfers found "
+                        "from the available candidates."
                     )
 
-
-                # ----------------------------------
-                # TRANSFERS FOUND
-                # ----------------------------------
 
                 else:
 
@@ -816,6 +814,7 @@ else:
 
 
                     st.dataframe(
+
                         transfer_df.head(10)[
                             transfer_display
                         ],
@@ -858,12 +857,11 @@ else:
 
                     else:
 
-                        price_text = (
-                            "£0.0m"
-                        )
+                        price_text = "£0.0m"
 
 
                     st.success(
+
                         f"🔥 Best transfer: "
                         f"{best_transfer['Sell']} → "
                         f"{best_transfer['Buy']}  |  "
@@ -883,6 +881,7 @@ else:
 
 
                     st.write(
+
                         f"**Sell:** "
                         f"{best_transfer['Sell']}  \n"
 
@@ -902,14 +901,11 @@ else:
                     )
 
 
-# ==================================================
-# FOOTER
-# ==================================================
-
 st.divider()
+
 
 st.caption(
     "FPL 5-Gameweek Optimizer • "
-    "Player and fixture data retrieved from "
+    "Live player and fixture data from "
     "the official Fantasy Premier League API."
 )
