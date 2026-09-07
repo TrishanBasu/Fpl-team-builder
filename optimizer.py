@@ -22,7 +22,7 @@ def build_best_team(
 ):
     """
     Build the highest-scoring legal 15-player
-    FPL squad within the budget.
+    FPL squad within the £100m budget.
     """
 
     players = df.copy()
@@ -56,10 +56,7 @@ def build_best_team(
     lower_bounds = []
     upper_bounds = []
 
-    # ------------------------------------------------
-    # Position constraints
-    # ------------------------------------------------
-
+    # Position requirements
     for position, required in (
         POSITION_REQUIREMENTS.items()
     ):
@@ -71,32 +68,18 @@ def build_best_team(
 
         constraints.append(row)
 
-        lower_bounds.append(
-            required
-        )
+        lower_bounds.append(required)
+        upper_bounds.append(required)
 
-        upper_bounds.append(
-            required
-        )
-
-    # ------------------------------------------------
     # £100m budget
-    # ------------------------------------------------
-
     constraints.append(
         players["price"].values
     )
 
     lower_bounds.append(0)
+    upper_bounds.append(budget)
 
-    upper_bounds.append(
-        budget
-    )
-
-    # ------------------------------------------------
     # Maximum 3 players from one club
-    # ------------------------------------------------
-
     for club in (
         players["club_name"]
         .dropna()
@@ -111,12 +94,7 @@ def build_best_team(
         constraints.append(row)
 
         lower_bounds.append(0)
-
         upper_bounds.append(3)
-
-    # ------------------------------------------------
-    # Solve optimization problem
-    # ------------------------------------------------
 
     constraint_matrix = np.array(
         constraints
@@ -151,19 +129,23 @@ def build_best_team(
     return selected
 
 
-def is_valid_squad(
-    squad,
-    budget=100
+def is_valid_squad_structure(
+    squad
 ):
     """
-    Check whether a 15-player squad follows
-    the basic FPL squad rules.
+    Validate the actual FPL squad structure.
+
+    IMPORTANT:
+    This does NOT check the £100m current value.
+
+    Player prices can rise after a user bought them,
+    so current market value is not the same as the
+    original squad budget.
     """
 
     if len(squad) != 15:
         return False
 
-    # Position rules
     for position, required in (
         POSITION_REQUIREMENTS.items()
     ):
@@ -176,16 +158,6 @@ def is_valid_squad(
         if count != required:
             return False
 
-    # Budget
-    total_cost = pd.to_numeric(
-        squad["now_cost"],
-        errors="coerce"
-    ).fillna(0).sum()
-
-    if total_cost > budget:
-        return False
-
-    # Maximum 3 from one club
     club_counts = (
         squad["club_name"]
         .value_counts()
@@ -206,22 +178,32 @@ def find_transfer_suggestions(
     budget=100
 ):
     """
-    Find legal single-player transfers that
-    improve the projected 5GW score.
+    Find legal single-player transfer suggestions.
 
-    Uses a limited number of high-scoring candidates
-    to keep Streamlit Cloud fast.
+    The current squad's present market value is NOT
+    used to reject the squad.
+
+    Transfers are compared using current player prices.
+    Exact FPL affordability can depend on the user's
+    individual selling prices and bank balance, which
+    are not available from the public player API.
     """
 
-    current_squad = (
-        current_squad.copy()
-    )
+    current_squad = current_squad.copy()
 
-    current_names = set(
-        current_squad[
-            "player_name"
-        ]
-    )
+    # Make sure each player is unique
+    if "id" in current_squad.columns:
+
+        current_squad = (
+            current_squad
+            .drop_duplicates(
+                subset=["id"]
+            )
+        )
+
+    # A valid FPL squad must contain exactly 15 players
+    if len(current_squad) != 15:
+        return pd.DataFrame()
 
     current_squad["now_cost"] = pd.to_numeric(
         current_squad["now_cost"],
@@ -239,11 +221,31 @@ def find_transfer_suggestions(
         ].sum()
     )
 
-    available_players = df[
-        ~df[
-            "player_name"
-        ].isin(current_names)
-    ].copy()
+    # Use unique FPL player IDs
+    if "id" in current_squad.columns:
+
+        current_ids = set(
+            current_squad["id"]
+        )
+
+        available_players = df[
+            ~df["id"].isin(current_ids)
+        ].copy()
+
+    else:
+
+        # Fallback
+        current_names = set(
+            current_squad[
+                "player_name"
+            ]
+        )
+
+        available_players = df[
+            ~df[
+                "player_name"
+            ].isin(current_names)
+        ].copy()
 
     available_players[
         "now_cost"
@@ -269,7 +271,6 @@ def find_transfer_suggestions(
 
     suggestions = []
 
-    # Only test top candidates at each position
     candidates_per_position = 30
 
     for current_index, current_player in (
@@ -311,8 +312,8 @@ def find_transfer_suggestions(
             )
         )
 
-        # Only players who are projected
-        # to score better
+        # Only consider players with a better
+        # projected 5GW score
         alternatives = alternatives[
             alternatives[
                 "5GW Score"
@@ -322,24 +323,6 @@ def find_transfer_suggestions(
         for _, new_player in (
             alternatives.iterrows()
         ):
-
-            new_price = float(
-                new_player[
-                    "now_cost"
-                ]
-            )
-
-            # Quick budget check
-            new_total_cost = (
-                current_squad[
-                    "now_cost"
-                ].sum()
-                - current_price
-                + new_price
-            )
-
-            if new_total_cost > budget:
-                continue
 
             new_club = (
                 new_player[
@@ -353,7 +336,7 @@ def find_transfer_suggestions(
                 ]
             )
 
-            # Quick club check
+            # Maximum 3 players from one club
             if new_club != old_club:
 
                 new_club_count = (
@@ -367,7 +350,7 @@ def find_transfer_suggestions(
                 if new_club_count >= 3:
                     continue
 
-            # Create replacement squad
+            # Create the new squad
             new_squad = (
                 current_squad.copy()
             )
@@ -376,9 +359,9 @@ def find_transfer_suggestions(
                 current_index
             ] = new_player
 
-            if not is_valid_squad(
-                new_squad,
-                budget=budget
+            # Check squad structure only
+            if not is_valid_squad_structure(
+                new_squad
             ):
                 continue
 
@@ -396,12 +379,19 @@ def find_transfer_suggestions(
             if gain <= 0:
                 continue
 
+            new_price = float(
+                new_player[
+                    "now_cost"
+                ]
+            )
+
             price_change = (
                 new_price
                 - current_price
             )
 
             suggestions.append({
+
                 "Sell": current_name,
 
                 "Buy": new_player[
