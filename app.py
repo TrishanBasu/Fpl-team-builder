@@ -1,12 +1,17 @@
 import streamlit as st
 import pandas as pd
 
-from fpl_api import get_fpl_data, get_fixtures, get_next_5_gameweeks
+from fpl_api import (
+    get_fpl_data,
+    get_fixtures,
+    get_next_5_gameweeks,
+    calculate_fixture_difficulty
+)
 
 
-# --------------------------------------------------
+# ==================================================
 # PAGE SETUP
-# --------------------------------------------------
+# ==================================================
 
 st.set_page_config(
     page_title="FPL 5GW Optimizer",
@@ -22,57 +27,78 @@ st.write(
 )
 
 
-# --------------------------------------------------
+# ==================================================
 # LOAD KAGGLE PLAYER DATA
-# --------------------------------------------------
-
-df = pd.read_csv("fpl_player_statistics.csv")
-
-st.success(f"Player dataset loaded — {len(df)} players")
-
-
-# --------------------------------------------------
-# LOAD OFFICIAL FPL API
-# --------------------------------------------------
+# ==================================================
 
 try:
+
+    df = pd.read_csv("fpl_player_statistics.csv")
+
+    st.success(
+        f"Player dataset loaded successfully — {len(df)} players"
+    )
+
+except Exception as e:
+
+    st.error("Could not load the player dataset.")
+    st.error(str(e))
+    st.stop()
+
+
+# ==================================================
+# LOAD OFFICIAL FPL API
+# ==================================================
+
+try:
+
     fpl_data = get_fpl_data()
     fixtures = get_fixtures()
 
     st.success("Official FPL data connected successfully!")
 
 except Exception as e:
+
     st.error("Could not connect to the official FPL API.")
+    st.error(str(e))
     st.stop()
 
 
-# --------------------------------------------------
+# ==================================================
 # FIND NEXT 5 GAMEWEEKS
-# --------------------------------------------------
+# ==================================================
 
 next_5_gws = get_next_5_gameweeks(fixtures)
 
 
-if len(next_5_gws) < 5:
-    st.warning("Less than 5 upcoming Gameweeks were found.")
+if len(next_5_gws) == 0:
+
+    st.warning("No upcoming Gameweeks found.")
 
 else:
+
     st.subheader("📅 Next 5 Gameweeks")
 
-    gw_text = " → ".join([f"GW {gw}" for gw in next_5_gws])
+    gw_text = " → ".join(
+        [f"GW {gw}" for gw in next_5_gws]
+    )
 
     st.info(gw_text)
 
 
-# --------------------------------------------------
-# SHOW UPCOMING FIXTURES
-# --------------------------------------------------
+# ==================================================
+# CREATE TEAM ID → TEAM NAME MAPPING
+# ==================================================
 
 teams = {
     team["id"]: team["name"]
     for team in fpl_data["teams"]
 }
 
+
+# ==================================================
+# SHOW UPCOMING FIXTURES
+# ==================================================
 
 upcoming_fixtures = []
 
@@ -95,34 +121,152 @@ for fixture in fixtures:
         )
 
         upcoming_fixtures.append({
+
             "Gameweek": fixture["event"],
+
             "Home": home_team,
+
             "Away": away_team,
-            "Home Difficulty": fixture["team_h_difficulty"],
-            "Away Difficulty": fixture["team_a_difficulty"]
+
+            "Home Difficulty":
+                fixture["team_h_difficulty"],
+
+            "Away Difficulty":
+                fixture["team_a_difficulty"]
         })
 
 
-fixture_df = pd.DataFrame(upcoming_fixtures)
+fixture_df = pd.DataFrame(
+    upcoming_fixtures
+)
 
 
 st.subheader("🗓️ Upcoming Fixtures")
 
+
+if not fixture_df.empty:
+
+    st.dataframe(
+        fixture_df,
+        use_container_width=True,
+        hide_index=True
+    )
+
+else:
+
+    st.info("No upcoming fixtures found.")
+
+
+# ==================================================
+# CALCULATE PLAYER FIXTURE DIFFICULTY
+# ==================================================
+
+fixture_scores = []
+
+
+for _, player in df.iterrows():
+
+    club_name = player["club name"]
+
+    team_id = None
+
+    # Find the FPL team ID
+    for team in fpl_data["teams"]:
+
+        if team["name"] == club_name:
+
+            team_id = team["id"]
+
+            break
+
+
+    # Calculate average difficulty
+    if team_id is not None:
+
+        avg_difficulty = calculate_fixture_difficulty(
+            fixtures,
+            team_id,
+            next_5_gws
+        )
+
+    else:
+
+        avg_difficulty = None
+
+
+    fixture_scores.append(
+        avg_difficulty
+    )
+
+
+# Add the result to our player dataframe
+
+df["5GW Avg Difficulty"] = fixture_scores
+
+
+# ==================================================
+# PLAYER FIXTURE OUTLOOK
+# ==================================================
+
+st.subheader("📊 Player Fixture Outlook")
+
+
+display_columns = [
+
+    "player name (first and second name)",
+
+    "club name",
+
+    "position name",
+
+    "now cost",
+
+    "total points",
+
+    "form",
+
+    "5GW Avg Difficulty"
+]
+
+
+# Only use columns that actually exist
+
+available_columns = [
+
+    column
+
+    for column in display_columns
+
+    if column in df.columns
+]
+
+
+# Sort by easiest fixtures
+
+fixture_view = (
+
+    df[available_columns]
+
+    .sort_values(
+        "5GW Avg Difficulty",
+        na_position="last"
+    )
+
+    .head(30)
+)
+
+
 st.dataframe(
-    fixture_df,
+    fixture_view,
     use_container_width=True,
     hide_index=True
 )
 
 
-# --------------------------------------------------
-# PLAYER DATA PREVIEW
-# --------------------------------------------------
+# ==================================================
+# END
+# ==================================================
 
-st.subheader("👤 Player Data")
-
-st.dataframe(
-    df.head(10),
-    use_container_width=True,
-    hide_index=True
+st.success(
+    "✅ Next 5 Gameweeks and player fixture difficulty calculated!"
 )
