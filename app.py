@@ -51,7 +51,7 @@ except Exception as e:
 
 
 # ==================================================
-# LOAD FPL API
+# LOAD OFFICIAL FPL API
 # ==================================================
 
 try:
@@ -72,7 +72,7 @@ except Exception as e:
 
 
 # ==================================================
-# NEXT 5 GAMEWEEKS
+# FIND NEXT 5 GAMEWEEKS
 # ==================================================
 
 next_5_gws = get_next_5_gameweeks(
@@ -101,16 +101,6 @@ else:
     st.warning(
         "No upcoming Gameweeks found."
     )
-
-
-# ==================================================
-# TEAM MAPPING
-# ==================================================
-
-teams = {
-    team["id"]: team["name"]
-    for team in fpl_data["teams"]
-}
 
 
 # ==================================================
@@ -250,7 +240,7 @@ df["5GW Score"] = (
 
 
 # ==================================================
-# MAIN OPTIONS
+# MAIN MENU
 # ==================================================
 
 st.divider()
@@ -284,12 +274,6 @@ if option == "🏆 Build Full Team":
         "🏆 Best £100m Team"
     )
 
-    st.write(
-        "The optimizer will select 15 players "
-        "based on their projected 5-GW score."
-    )
-
-
     if st.button(
         "🚀 Build My Team",
         type="primary"
@@ -309,13 +293,10 @@ if option == "🏆 Build Full Team":
 
         else:
 
-            # Convert price to millions
             best_team["Price (£m)"] = (
                 best_team["price"] / 10
             )
 
-
-            # Total cost
             total_cost = (
                 best_team["price"].sum()
                 / 10
@@ -328,7 +309,6 @@ if option == "🏆 Build Full Team":
             )
 
 
-            # Position order
             position_order = {
 
                 "Goalkeeper": 1,
@@ -385,58 +365,6 @@ if option == "🏆 Build Full Team":
             )
 
 
-            # Position summary
-            st.subheader(
-                "📋 Squad Summary"
-            )
-
-
-            position_counts = (
-                best_team[
-                    "position_name"
-                ]
-                .value_counts()
-            )
-
-
-            col1, col2, col3, col4 = (
-                st.columns(4)
-            )
-
-
-            col1.metric(
-                "🧤 GK",
-                position_counts.get(
-                    "Goalkeeper",
-                    0
-                )
-            )
-
-            col2.metric(
-                "🛡️ DEF",
-                position_counts.get(
-                    "Defender",
-                    0
-                )
-            )
-
-            col3.metric(
-                "⚽ MID",
-                position_counts.get(
-                    "Midfielder",
-                    0
-                )
-            )
-
-            col4.metric(
-                "🎯 FWD",
-                position_counts.get(
-                    "Forward",
-                    0
-                )
-            )
-
-
 # ==================================================
 # TRANSFER SUGGESTIONS
 # ==================================================
@@ -447,6 +375,223 @@ else:
         "🔄 Transfer Suggestions"
     )
 
-    st.info(
-        "Transfer mode will be added in the next step."
+    st.write(
+        "Select a player from your current squad "
+        "and we'll find better options for the next "
+        "5 Gameweeks."
     )
+
+
+    # --------------------------------------------------
+    # SELECT CURRENT PLAYER
+    # --------------------------------------------------
+
+    player_names = sorted(
+        df["player_name"]
+        .dropna()
+        .unique()
+        .tolist()
+    )
+
+
+    current_player = st.selectbox(
+        "Select a player you currently own",
+        player_names
+    )
+
+
+    # Find selected player's row
+
+    current_row = df[
+        df["player_name"] == current_player
+    ].iloc[0]
+
+
+    current_position = (
+        current_row["position_name"]
+    )
+
+
+    current_score = float(
+        current_row["5GW Score"]
+    )
+
+
+    current_price = float(
+        current_row["now_cost"]
+    )
+
+
+    current_club = (
+        current_row["club_name"]
+    )
+
+
+    # --------------------------------------------------
+    # DISPLAY CURRENT PLAYER
+    # --------------------------------------------------
+
+    st.markdown(
+        "### 👤 Current Player"
+    )
+
+
+    col1, col2, col3, col4 = st.columns(4)
+
+
+    col1.metric(
+        "Player",
+        current_player
+    )
+
+
+    col2.metric(
+        "Position",
+        current_position
+    )
+
+
+    col3.metric(
+        "Price",
+        f"£{current_price / 10:.1f}m"
+    )
+
+
+    col4.metric(
+        "5GW Score",
+        f"{current_score:.2f}"
+    )
+
+
+    # --------------------------------------------------
+    # FIND ALTERNATIVES
+    # --------------------------------------------------
+
+    alternatives = df[
+        (
+            df["position_name"]
+            == current_position
+        )
+
+        &
+
+        (
+            df["player_name"]
+            != current_player
+        )
+    ].copy()
+
+
+    # Calculate improvement
+
+    alternatives["Score Improvement"] = (
+
+        alternatives["5GW Score"]
+
+        -
+
+        current_score
+
+    )
+
+
+    # Price difference
+
+    alternatives["Price Difference (£m)"] = (
+
+        (
+            alternatives["now_cost"]
+            -
+            current_price
+        )
+
+        / 10
+
+    )
+
+
+    # Keep only players with better score
+
+    alternatives = alternatives[
+        alternatives["Score Improvement"] > 0
+    ]
+
+
+    # Sort by improvement
+
+    alternatives = (
+        alternatives
+        .sort_values(
+            "Score Improvement",
+            ascending=False
+        )
+        .head(10)
+    )
+
+
+    # --------------------------------------------------
+    # SHOW TRANSFER SUGGESTIONS
+    # --------------------------------------------------
+
+    st.markdown(
+        "### 🔥 Recommended Transfers"
+    )
+
+
+    if alternatives.empty:
+
+        st.info(
+            "No better player was found."
+        )
+
+    else:
+
+        transfer_columns = [
+
+            "player_name",
+
+            "club_name",
+
+            "position_name",
+
+            "now_cost",
+
+            "5GW Score",
+
+            "5GW Avg Difficulty",
+
+            "Score Improvement",
+
+            "Price Difference (£m)"
+
+        ]
+
+
+        available_columns = [
+
+            column
+
+            for column in transfer_columns
+
+            if column in alternatives.columns
+
+        ]
+
+
+        st.dataframe(
+
+            alternatives[
+                available_columns
+            ],
+
+            use_container_width=True,
+
+            hide_index=True
+
+        )
+
+
+        st.success(
+            "These players have a higher projected "
+            "5-GW score than your selected player."
+        )
