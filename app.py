@@ -28,7 +28,7 @@ st.write(
 
 
 # ==================================================
-# LOAD KAGGLE PLAYER DATA
+# LOAD PLAYER DATA
 # ==================================================
 
 try:
@@ -70,7 +70,6 @@ except Exception as e:
 
 next_5_gws = get_next_5_gameweeks(fixtures)
 
-
 if len(next_5_gws) == 0:
 
     st.warning("No upcoming Gameweeks found.")
@@ -87,7 +86,7 @@ else:
 
 
 # ==================================================
-# CREATE TEAM ID → TEAM NAME MAPPING
+# CREATE TEAM ID → TEAM NAME
 # ==================================================
 
 teams = {
@@ -97,11 +96,10 @@ teams = {
 
 
 # ==================================================
-# SHOW UPCOMING FIXTURES
+# UPCOMING FIXTURES
 # ==================================================
 
 upcoming_fixtures = []
-
 
 for fixture in fixtures:
 
@@ -166,7 +164,10 @@ fixture_scores = []
 
 for _, player in df.iterrows():
 
-    club_name = player["club name"]
+    # IMPORTANT:
+    # Your CSV uses "club_name"
+
+    club_name = player["club_name"]
 
     team_id = None
 
@@ -199,7 +200,7 @@ for _, player in df.iterrows():
     )
 
 
-# Add the result to our player dataframe
+# Add difficulty to player data
 
 df["5GW Avg Difficulty"] = fixture_scores
 
@@ -213,23 +214,29 @@ st.subheader("📊 Player Fixture Outlook")
 
 display_columns = [
 
-    "player name (first and second name)",
+    "player_name",
 
-    "club name",
+    "club_name",
 
-    "position name",
+    "position_name",
 
-    "now cost",
+    "now_cost",
 
-    "total points",
+    "total_points",
 
     "form",
+
+    "points_per_game",
+
+    "expected_goals",
+
+    "expected_assists",
 
     "5GW Avg Difficulty"
 ]
 
 
-# Only use columns that actually exist
+# Keep only columns that exist
 
 available_columns = [
 
@@ -264,7 +271,7 @@ st.dataframe(
 
 
 # ==================================================
-# END
+# SUCCESS
 # ==================================================
 
 st.success(
